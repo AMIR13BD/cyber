@@ -62,7 +62,7 @@ def train_autoencoder(
     encoding_dim: int = DEFAULT_ENCODING_DIM,
     x_val_normal: np.ndarray | None = None,
     patience: int = EARLY_STOPPING_PATIENCE,
-) -> TabularAutoencoder:
+) -> tuple[TabularAutoencoder, dict]:
     """Train an autoencoder on benign traffic only with optional early stopping."""
     set_seed()
     device = torch.device("cpu")
@@ -76,8 +76,11 @@ def train_autoencoder(
     best_val_loss = float("inf")
     stale_epochs = 0
     best_state = None
+    epochs_completed = 0
+    early_stopped = False
 
     for epoch in range(epochs):
+        epochs_completed = epoch + 1
         model.train()
         epoch_loss = 0.0
         for (batch,) in loader:
@@ -108,6 +111,7 @@ def train_autoencoder(
                 )
             if stale_epochs >= patience:
                 print(f"  Early stopping at epoch {epoch + 1}")
+                early_stopped = True
                 break
         elif (epoch + 1) % 5 == 0:
             print(f"  Autoencoder epoch {epoch + 1}/{epochs}, train MSE={train_loss:.6f}")
@@ -115,7 +119,12 @@ def train_autoencoder(
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
-    return model
+    training_meta = {
+        "epochs_requested": epochs,
+        "epochs_completed": epochs_completed,
+        "early_stopped": early_stopped,
+    }
+    return model, training_meta
 
 
 def reconstruction_errors(model: TabularAutoencoder, x: np.ndarray) -> np.ndarray:
@@ -149,15 +158,21 @@ def train_and_evaluate_autoencoder(
     x_test: np.ndarray,
     y_test: np.ndarray,
     input_dim: int,
-) -> tuple[TabularAutoencoder, np.ndarray, np.ndarray, float, np.ndarray]:
+    epochs: int = DEFAULT_EPOCHS,
+    percentile: float = DEFAULT_THRESHOLD_PERCENTILE,
+    early_stopping: bool = True,
+) -> tuple[TabularAutoencoder, np.ndarray, np.ndarray, float, np.ndarray, dict]:
     """Train on normal data, threshold on validation normal, score test set."""
-    model = train_autoencoder(
+    model, training_meta = train_autoencoder(
         x_train_normal,
         input_dim=input_dim,
-        x_val_normal=x_val_normal,
+        epochs=epochs,
+        x_val_normal=x_val_normal if early_stopping else None,
     )
     val_errors = reconstruction_errors(model, x_val_normal)
-    threshold = fit_threshold(val_errors)
+    threshold = fit_threshold(val_errors, percentile=percentile)
     test_errors = reconstruction_errors(model, x_test)
     y_pred, y_score = predict_from_errors(test_errors, threshold)
-    return model, y_pred, y_score, threshold, test_errors
+    training_meta["threshold_percentile"] = percentile
+    training_meta["threshold_value"] = threshold
+    return model, y_pred, y_score, threshold, test_errors, training_meta

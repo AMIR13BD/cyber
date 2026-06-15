@@ -1,0 +1,11 @@
+{
+  "num_features_after_encoding": 126,
+  "num_model_features": 121,
+  "removed_constant_columns": [
+    "num_outbound_cmds"
+  ],
+  "removed_correlated_columns": [],
+  "anomaly_scaler_fit_on": "normal_train_only",
+  "supervised_scaler_fit_on": "all_kddtrain_rows",
+  "encoding_fit_on": "kddtrain_only"
+}

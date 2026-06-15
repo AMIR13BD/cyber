@@ -27,6 +27,8 @@ def classification_report_dict(y_true, y_pred, y_score=None) -> dict[str, float 
         "f1": f1_score(y_true, y_pred, zero_division=0),
         "f2": fbeta_score(y_true, y_pred, beta=2, zero_division=0),
         "mcc": matthews_corrcoef(y_true, y_pred),
+        "fpr": fp / (fp + tn) if (fp + tn) > 0 else 0.0,
+        "fnr": fn / (fn + tp) if (fn + tp) > 0 else 0.0,
         "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
     }
     if y_score is not None and len(np.unique(y_true)) > 1:

@@ -1,0 +1,17 @@
+model,category,total_samples,true_positives,false_negatives,recall
+logistic_regression,DoS,7458,6102,1356,0.8181818181818182
+logistic_regression,Probe,2421,1843,578,0.7612556794712928
+logistic_regression,R2L,2754,23,2731,0.008351488743645606
+logistic_regression,U2R,200,13,187,0.065
+random_forest,DoS,7458,6071,1387,0.8140252078305176
+random_forest,Probe,2421,1855,566,0.7662123089632383
+random_forest,R2L,2754,176,2578,0.06390704429920116
+random_forest,U2R,200,9,191,0.045
+autoencoder_source_protocol,DoS,7458,5583,1875,0.7485921158487531
+autoencoder_source_protocol,Probe,2421,1894,527,0.7823213548120611
+autoencoder_source_protocol,R2L,2754,259,2495,0.09404502541757444
+autoencoder_source_protocol,U2R,200,60,140,0.3
+isolation_forest_source_protocol,DoS,7458,5333,2125,0.7150710646285867
+isolation_forest_source_protocol,Probe,2421,1887,534,0.7794299876084263
+isolation_forest_source_protocol,R2L,2754,23,2731,0.008351488743645606
+isolation_forest_source_protocol,U2R,200,28,172,0.14

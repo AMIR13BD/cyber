@@ -1,0 +1,15 @@
+{
+  "autoencoder": 0.6734347343444824,
+  "isolation_forest": 0.5237970352652014,
+  "percentile": 99,
+  "autoencoder_training": {
+    "epochs_requested": 50,
+    "epochs_completed": 50,
+    "early_stopped": false,
+    "threshold_percentile": 99,
+    "threshold_value": 0.6734347343444824
+  },
+  "calibration_split": "normal_validation_from_kddtrain",
+  "isolation_forest_trees": 200,
+  "autoencoder_epochs": 50
+}

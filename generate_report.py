@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the expanded final project PDF report from experiment results."""
+"""Generate the final project PDF report from experiment results."""
 
 from __future__ import annotations
 
@@ -11,13 +11,12 @@ from fpdf import FPDF
 
 ROOT = Path(__file__).resolve().parent
 FIG_DIR = ROOT / "results" / "figures"
-RESULTS = json.loads((ROOT / "results" / "experiment_results.json").read_text(encoding="utf-8"))
+RESULTS_DIR = ROOT / "results"
+RESULTS = json.loads((RESULTS_DIR / "experiment_results.json").read_text(encoding="utf-8"))
 METRICS = RESULTS["metrics"]
 DATASET = RESULTS["dataset"]
-THRESHOLDS = RESULTS.get("thresholds", {})
-ERROR_BY_CATEGORY = RESULTS.get("error_by_category", {})
+PREPROCESSING = RESULTS.get("preprocessing", {})
 RUNTIME = RESULTS.get("runtime_seconds", {})
-COMPARISON_CSV = ROOT / "results" / "model_comparison.csv"
 
 
 class ReportPDF(FPDF):
@@ -46,7 +45,7 @@ class ReportPDF(FPDF):
         if not path.exists():
             self.body(f"[Figure missing: {path.name}]")
             return
-        if self.get_y() > 200:
+        if self.get_y() > 190:
             self.add_page()
         self.image(str(path), w=width)
         self.ln(2)
@@ -54,75 +53,45 @@ class ReportPDF(FPDF):
         self.multi_cell(0, 4, caption)
         self.ln(2)
 
-
-def metric_line(name: str, values: dict) -> str:
-    return (
-        f"{name}: Accuracy={values['accuracy']:.3f}, Precision={values['precision']:.3f}, "
-        f"Recall={values['recall']:.3f}, F1={values['f1']:.3f}, F2={values['f2']:.3f}, "
-        f"MCC={values['mcc']:.3f}, ROC-AUC={values.get('roc_auc', float('nan')):.3f}, "
-        f"PR-AUC={values.get('pr_auc', float('nan')):.3f}"
-    )
-
-
-def best_model(metric: str) -> str:
-    ranked = sorted(METRICS.items(), key=lambda item: item[1].get(metric, -1), reverse=True)
-    return ranked[0][0].replace("_", " ").title()
+    def table_from_csv(self, path: Path, title: str, max_rows: int = 12) -> None:
+        if not path.exists():
+            self.body(f"[Table missing: {path.name}]")
+            return
+        df = pd.read_csv(path)
+        if len(df) > max_rows:
+            df = df.head(max_rows)
+        self.body(f"{title}\n{df.round(3).to_string(index=False)}")
 
 
-def format_comparison_table() -> str:
-    df = pd.read_csv(COMPARISON_CSV, index_col=0).round(3)
-    lines = ["Model comparison on NSL-KDD test set:\n"]
-    header = f"{'Model':<22}" + "".join(f"{col:>10}" for col in df.columns)
-    lines.append(header)
-    lines.append("-" * len(header))
-    for model, row in df.iterrows():
-        lines.append(f"{model:<22}" + "".join(f"{row[col]:>10.3f}" for col in df.columns))
-    return "\n".join(lines)
-
-
-def format_category_errors(model_name: str) -> str:
-    errors = ERROR_BY_CATEGORY.get(model_name, {})
-    fn = errors.get("false_negatives", {})
-    fp = errors.get("false_positives", {})
-    lines = [f"{model_name.replace('_', ' ').title()}:"]
-    lines.append("  False negatives by category (missed attacks):")
-    if fn:
-        for cat, count in fn.items():
-            lines.append(f"    - {cat}: {count}")
-    else:
-        lines.append("    - none")
-    lines.append("  False positives by category (benign flagged as attack):")
-    if fp:
-        for cat, count in list(fp.items())[:5]:
-            lines.append(f"    - {cat}: {count}")
-    else:
-        lines.append("    - none")
-    return "\n".join(lines)
+def load_source_protocol() -> pd.DataFrame:
+    return pd.read_csv(RESULTS_DIR / "source_protocol_model_comparison.csv", index_col=0)
 
 
 def reproducibility_text() -> str:
     total = RUNTIME.get("total_seconds")
     if total:
         return (
-            "Execution status: In this submission environment we re-ran the documented commands "
-            f"(pip install -r requirements.txt, python run_pipeline.py, python generate_report.py) "
-            f"and the pipeline completed successfully in about {total:.0f} seconds on CPU.\n\n"
-            "Runtime breakdown (seconds):\n"
-            + "\n".join(f"  - {k}: {v}" for k, v in RUNTIME.items())
-            + "\n\n"
-            "A fresh clone still requires downloading NSL-KDD into data/ before running the pipeline."
+            "In this submission environment we re-ran:\n"
+            "  pip install -r requirements.txt\n"
+            "  python run_pipeline.py\n"
+            "  python generate_report.py\n"
+            f"The pipeline completed successfully in about {total:.0f} seconds on CPU. "
+            "A fresh clone still requires downloading KDDTrain+.txt and KDDTest+.txt into data/. "
+            "Small numeric differences vs the original tutorial may occur because of package versions "
+            "and random seeds, but the protocol (50 AE epochs, 200 IF trees, 99th percentile on the "
+            "same normal_validation split) is matched."
         )
-    return (
-        "Execution status: The repository documents a reproducible workflow. "
-        "Run pip install -r requirements.txt, download the dataset, then "
-        "python run_pipeline.py and python generate_report.py."
-    )
+    return "See README for documented reproduction commands."
 
 
 def build_report() -> Path:
     pdf = ReportPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+
+    source_df = load_source_protocol()
+    ae_row = source_df.loc["autoencoder_source_protocol"]
+    if_row = source_df.loc["isolation_forest_source_protocol"]
 
     pdf.set_font("Helvetica", "B", 16)
     pdf.multi_cell(0, 8, "Critical Reproduction Study:\nNetwork Intrusion Detection with Autoencoders on NSL-KDD")
@@ -132,179 +101,141 @@ def build_report() -> Path:
         0,
         5,
         "Course: Data Science in Cyber (Dr. Uri Itai)\n"
-        "Selected source: Network Intrusion Detection with Autoencoders by Steven Foerster\n"
-        "URL: https://stevenfoerster.com/tutorials/network-intrusion-detection-with-autoencoders/\n"
-        "Dataset mirror: https://github.com/defcom17/NSL_KDD",
+        "Source: Network Intrusion Detection with Autoencoders - Steven Foerster\n"
+        "https://stevenfoerster.com/tutorials/network-intrusion-detection-with-autoencoders/\n"
+        "No official GitHub repo for the article. Dataset mirror: github.com/defcom17/NSL_KDD",
     )
 
     pdf.section("Executive Summary")
     pdf.body(
-        "This project reproduces Steven Foerster's autoencoder IDS tutorial on NSL-KDD. "
-        "We trained a PyTorch autoencoder on normal traffic, used reconstruction error as an anomaly "
-        "score, and compared it with Logistic Regression, Random Forest, and Isolation Forest.\n\n"
-        f"The autoencoder achieved the best F1 ({METRICS['autoencoder']['f1']:.3f}) and recall "
-        f"({METRICS['autoencoder']['recall']:.3f}). Random Forest still leads ROC-AUC "
-        f"({METRICS['random_forest']['roc_auc']:.3f}) when labels are used. The author's core claim "
-        "about reconstruction-based anomaly detection is supported, but autoencoders do not universally "
-        "beat all supervised baselines. False negatives on R2L and U2R categories remain the main risk."
+        "We reproduced the source protocol: PyTorch autoencoder trained on normal_train only (50 epochs), "
+        "Isolation Forest with 200 trees on normal_train only, and both thresholds calibrated on the "
+        "same normal_validation split at the 99th percentile. Strict preprocessing fits the anomaly "
+        "scaler on normal_train only and removes constant features such as num_outbound_cmds.\n\n"
+        f"At the source operating point (99th percentile), autoencoder F1={ae_row['f1']:.3f}, "
+        f"recall={ae_row['recall']:.3f}; Isolation Forest F1={if_row['f1']:.3f}, "
+        f"recall={if_row['recall']:.3f}. The tutorial claims a modest, dataset-dependent advantage for "
+        "autoencoders over Isolation Forest - not universal superiority over all classical methods. "
+        "Our threshold-sensitivity analysis shows higher recall at 95% is threshold-dependent and does "
+        "not by itself prove better feature interaction learning."
     )
 
     pdf.section("1. Summary of the Source")
     pdf.body(
-        "Problem: Detect malicious network connections before damage occurs (DoS, Probe, R2L, U2R).\n\n"
-        "Proposed solution: Train an autoencoder on normal traffic only. Attacks yield high reconstruction "
-        "error and are flagged above a percentile threshold calibrated on held-out normal validation data.\n\n"
-        f"Dataset: {DATASET['train_rows']:,} train / {DATASET['test_rows']:,} test records, "
-        f"{DATASET['num_features_after_encoding']} features after encoding.\n\n"
-        "The selected article provides implementation details but no official GitHub repository. "
-        "We used the public NSL-KDD mirror on GitHub (defcom17/NSL_KDD) for data files."
+        "Problem: binary/normal-vs-attack intrusion detection on NSL-KDD connection records.\n"
+        "Source protocol: 50 autoencoder epochs, MSE reconstruction error, 99th percentile threshold on "
+        "held-out normal validation traffic, 200-tree Isolation Forest trained on the same normal_train, "
+        "threshold also calibrated on normal_validation scores at the 99th percentile.\n"
+        "Claim: autoencoders may outperform Isolation Forest on some attack types by learning feature "
+        "relationships, but the advantage is modest and dataset-dependent."
     )
 
-    pdf.section("2. Critical Evaluation of the Author's Claims")
+    pdf.section("2. Critical Evaluation")
     pdf.body(
-        "Claims: (1) autoencoders capture multi-feature attack patterns, (2) reconstruction error is a valid "
-        "anomaly score, (3) autoencoders can beat Isolation Forest under normal-only training.\n\n"
-        "Our reproduction supports (1)-(3) on this split. The autoencoder outperformed Isolation Forest on "
-        "F1, recall, and MCC. However, Random Forest still achieved the highest ROC-AUC, so the broader "
-        "claim that autoencoders beat all classical methods is only partially supported.\n\n"
-        "Limitations: dated dataset, different train/test prevalence ({:.1f}% vs {:.1f}%), threshold "
-        "sensitivity, no real-time deployment test, and poor detection of rare R2L/U2R attacks.".format(
-            DATASET["train_attack_rate"] * 100,
-            DATASET["test_attack_rate"] * 100,
-        )
+        "Our earlier 95th-percentile result used a different precision-recall trade-off and is not the "
+        "fair comparison to the source. The correct reproduction uses 99th percentile on normal_validation "
+        "for both anomaly models.\n\n"
+        "Threshold choice directly controls FPR/FNR: lower percentiles increase recall but also false "
+        "alarms. We do NOT claim autoencoders capture patterns tree models miss unless shown under the "
+        "same operating point. Lower raw false-negative counts at 95% may reflect threshold calibration, "
+        "not proven feature-interaction superiority.\n\n"
+        f"At 99%: Autoencoder F1={ae_row['f1']:.3f}, recall={ae_row['recall']:.3f}; "
+        f"Isolation Forest F1={if_row['f1']:.3f}, recall={if_row['recall']:.3f}. "
+        "At 95% both models achieve higher recall, but that is a different operating point. "
+        "Supervised Random Forest remains competitive when labels are available."
     )
 
-    pdf.section("3. Feature Engineering Analysis")
+    pdf.section("3. Feature Engineering")
     pdf.body(
-        "One-hot encoding for protocol_type, service, and flag. StandardScaler fit on training data only. "
-        "Scaling is required for the autoencoder and logistic regression. NSL-KDD has redundant rate/count "
-        "features (Pearson > 0.95), which reduces interpretability. Additional useful features would include "
-        "TLS fingerprints, inter-arrival times, and cyclical time encodings if timestamps were available."
+        f"Encoding fit on KDDTrain+ only. Constant columns removed: {PREPROCESSING.get('removed_constant_columns', [])}. "
+        "Anomaly scaler fit on normal_train only - attack rows no longer influence anomaly preprocessing. "
+        "Supervised scaler fit on all KDDTrain+ rows because labels are used. "
+        "Feature ablation compares full features, constant removal, and redundant-feature removal."
     )
 
-    pdf.section("4. Reproducibility Analysis")
+    pdf.section("4. Reproducibility")
     pdf.body(reproducibility_text())
 
-    pdf.section("5. Exploratory Data Analysis")
+    pdf.section("5. Exploratory Data Analysis and Distribution Shift")
     pdf.body(
-        "NSL-KDD has 41 meaningful connection-level features, no missing values, and class imbalance "
-        "between train and test. There is no global timestamp, so temporal drift analysis is not possible; "
-        "only per-connection duration is available. Outliers are common in byte-count features (heavy tails), "
-        "which is typical in cybersecurity traffic and motivates robust statistics (median, IQR, MAD).\n\n"
-        "Single-value and near-constant columns carry little discriminative power. Duplicate rows are rare. "
-        "Crosstab analysis shows attacks are unevenly distributed across protocol types (TCP dominates). "
-        "Pearson correlation captures linear relationships among rate features; Spearman is more appropriate "
-        "for skewed byte-count distributions. Kendall was not primary here due to the large sample size.\n\n"
-        "Class imbalance matters: test attack rate is {:.1f}% vs {:.1f}% in training. Accuracy alone would "
-        "overstate performance if the model simply predicts the majority class.".format(
-            DATASET["test_attack_rate"] * 100,
-            DATASET["train_attack_rate"] * 100,
-        )
+        f"Train attack rate: {DATASET['train_attack_rate']*100:.1f}%. "
+        f"Test attack rate: {DATASET['test_attack_rate']*100:.1f}%. "
+        "This shift affects accuracy and precision/recall even when ranking quality is stable. "
+        "No global timestamp exists; temporal drift analysis is not meaningful beyond connection duration."
     )
-    pdf.figure(
-        FIG_DIR / "class_imbalance.png",
-        "Figure 1: Class imbalance - attack prevalence and category distribution in training data.",
-    )
+    pdf.figure(FIG_DIR / "class_imbalance.png", "Figure 1: Class and category imbalance in KDDTrain+.")
+    pdf.figure(FIG_DIR / "train_test_shift.png", "Figure 2: Train vs test attack prevalence shift.")
+    pdf.table_from_csv(RESULTS_DIR / "distribution_shift_summary.csv", "Table 1: Distribution shift summary (excerpt).", 8)
 
+    pdf.add_page()
     pdf.section("6. Experimental Setup")
     pdf.body(
-        "Official NSL-KDD train/test split. Supervised models use an 80/20 stratified internal split. "
-        "Unsupervised models train on normal traffic only. Autoencoder: input->64->32->8->32->64->input, "
-        "MSE loss, Adam, max 20 epochs with early stopping (patience=3), batch size 256, CPU only. "
-        "Random Forest: 100 trees. Isolation Forest: 100 trees. Threshold: 95th percentile of normal scores.\n"
-        f"Autoencoder threshold={THRESHOLDS.get('autoencoder', 'n/a'):.4f}, "
-        f"Isolation Forest threshold={THRESHOLDS.get('isolation_forest', 'n/a'):.4f}."
+        f"normal_train rows: {DATASET.get('normal_train_rows', 'n/a')}, "
+        f"normal_validation rows: {DATASET.get('normal_validation_rows', 'n/a')}. "
+        "Supervised models trained on all KDDTrain+. Source-protocol anomaly models use normal_train / "
+        "normal_validation split with 99th-percentile thresholds."
     )
 
-    pdf.add_page()
-    pdf.section("7. Model Training and Comparison")
-    pdf.body(format_comparison_table())
-    pdf.body(
-        "\nDetailed results:\n"
-        + metric_line("Autoencoder", METRICS["autoencoder"])
-        + "\n"
-        + metric_line("Isolation Forest", METRICS["isolation_forest"])
-        + "\n"
-        + metric_line("Random Forest", METRICS["random_forest"])
-        + "\n"
-        + metric_line("Logistic Regression", METRICS["logistic_regression"])
-        + f"\n\nBest F1: {best_model('f1')}. Best recall: {best_model('recall')}. "
-        f"Best ROC-AUC: {best_model('roc_auc')}."
-    )
-    pdf.figure(
-        FIG_DIR / "model_metric_comparison.png",
-        "Figure 2: Precision, recall, and F1 comparison across all models.",
-    )
+    pdf.section("7. Source Protocol Results (99th percentile)")
+    pdf.body(source_df.round(3).to_string())
     pdf.figure(
         FIG_DIR / "autoencoder_reconstruction_error.png",
-        "Figure 3: Autoencoder reconstruction error distributions for normal vs attack traffic.",
+        "Figure 3: Reconstruction error distribution with 99th-percentile threshold.",
     )
-    pdf.figure(
-        FIG_DIR / "confusion_matrices.png",
-        "Figure 4: Confusion matrices - FP causes alert fatigue; FN means missed intrusions.",
+
+    pdf.section("8. Threshold Sensitivity")
+    pdf.body(
+        "Both anomaly models evaluated at 95th, 97th, and 99th percentiles on normal_validation. "
+        "Cyber interpretation: lower percentiles increase recall (fewer missed attacks) but raise FPR "
+        "(more alert fatigue)."
     )
+    pdf.table_from_csv(RESULTS_DIR / "threshold_sensitivity.csv", "Table 2: Threshold sensitivity metrics.")
+    pdf.figure(FIG_DIR / "threshold_recall.png", "Figure 4: Recall vs threshold percentile.")
+    pdf.figure(FIG_DIR / "threshold_f1.png", "Figure 5: F1 vs threshold percentile.")
+    pdf.figure(FIG_DIR / "threshold_fpr.png", "Figure 6: False positive rate vs threshold percentile.")
 
     pdf.add_page()
-    pdf.section("8. Evaluation Metrics - Definitions and Cybersecurity Interpretation")
+    pdf.section("9. Fair Anomaly Comparison")
     pdf.body(
-        "Accuracy = (TP + TN) / (TP + TN + FP + FN). Overall correctness; misleading under imbalance.\n\n"
-        "Precision = TP / (TP + FP). Fraction of alerts that are real attacks.\n\n"
-        "Recall = TP / (TP + FN). Fraction of attacks detected. Low recall is especially dangerous in IDS "
-        "because undetected intrusions may persist, spread laterally, or exfiltrate data.\n\n"
-        "F1 = 2PR / (P + R). Balanced metric for precision-recall trade-off.\n\n"
-        "F2 = 5PR / (4P + R). Weights recall higher - appropriate when missing attacks is costlier.\n\n"
-        "MCC = (TP*TN - FP*FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN)). Robust under class imbalance.\n\n"
-        "ROC-AUC: ranking quality across thresholds (TPR vs FPR). PR-AUC: precision-recall area; useful when "
-        "attack prevalence shifts between train and deployment.\n\n"
-        "Cyber meaning: FP wastes analyst time (alert fatigue). FN lets attackers remain inside the network. "
-        "For R2L/U2R attacks, a false negative can mean stolen credentials or privilege escalation."
+        "Same-percentile comparison aligns operating points. Equal-FPR comparison calibrates the autoencoder "
+        "threshold on normal_validation to match the Isolation Forest FPR at 99th percentile."
     )
+    pdf.table_from_csv(RESULTS_DIR / "fair_anomaly_comparison.csv", "Table 3: Fair anomaly comparison.")
+
+    pdf.section("10. Model Comparison (all models)")
+    pdf.table_from_csv(RESULTS_DIR / "model_comparison.csv", "Table 4: Full model comparison.")
+    pdf.figure(FIG_DIR / "confusion_matrices.png", "Figure 7: Confusion matrices.")
+    pdf.figure(FIG_DIR / "model_metric_comparison.png", "Figure 8: Metric comparison bar chart.")
+
+    pdf.section("11. Feature Ablation")
+    pdf.body(
+        "Constant features do not help and were removed in the main pipeline. Highly correlated features "
+        "hurt interpretability; removing them may or may not change performance materially."
+    )
+    pdf.table_from_csv(RESULTS_DIR / "feature_ablation.csv", "Table 5: Feature ablation results.")
 
     pdf.add_page()
-    pdf.section("9. Error Analysis by Attack Category")
+    pdf.section("12. Evaluation Metrics")
     pdf.body(
-        "False negatives (FN) are the highest-risk errors in IDS: the system fails to raise an alert while "
-        "an attack is in progress. False positives (FP) waste analyst time and contribute to alert fatigue.\n\n"
-        "On NSL-KDD, R2L attacks (remote-to-local unauthorized access) are the most frequently missed category "
-        "across all models because their flow statistics overlap with legitimate remote sessions. U2R attacks "
-        "(privilege escalation) are rare but critical: even a small number of missed U2R events can indicate "
-        "full host compromise.\n\n"
-        "Per-category false negatives on the test set:"
-    )
-    for model in ["autoencoder", "random_forest", "isolation_forest", "logistic_regression"]:
-        pdf.body(format_category_errors(model))
-
-    ae_fn = ERROR_BY_CATEGORY.get("autoencoder", {}).get("false_negatives", {})
-    rf_fn = ERROR_BY_CATEGORY.get("random_forest", {}).get("false_negatives", {})
-    pdf.body(
-        f"\nThe autoencoder reduced R2L false negatives from {rf_fn.get('R2L', 0)} (Random Forest) to "
-        f"{ae_fn.get('R2L', 0)}, and U2R false negatives from {rf_fn.get('U2R', 0)} to {ae_fn.get('U2R', 0)}. "
-        "This supports the author's claim that reconstruction-based models can capture multi-feature patterns "
-        "that tree models miss on stealthy attacks. However, R2L remains the dominant failure mode for all models.\n\n"
-        "Cybersecurity implication: a SOC relying solely on flow-based anomaly detection would still miss "
-        "credential-abuse and privilege-escalation attacks unless complemented by endpoint detection, "
-        "authentication logs, and rule-based correlation."
+        "Accuracy = (TP+TN)/(TP+TN+FP+FN). Precision = TP/(TP+FP). Recall = TP/(TP+FN). "
+        "F1 = 2PR/(P+R). F2 = 5PR/(4P+R). MCC = (TP*TN-FP*FN)/sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN)). "
+        "FPR = FP/(FP+TN). FNR = FN/(FN+TP). ROC-AUC measures ranking; PR-AUC is useful under prevalence shift. "
+        "In IDS, false negatives are often more dangerous than false positives because missed intrusions persist."
     )
 
-    pdf.add_page()
-    pdf.section("10. Conclusions and Future Improvements")
+    pdf.section("13. Error Analysis - Per-Category Recall")
     pdf.body(
-        "We reproduced the core autoencoder IDS workflow. Reconstruction error is a valid anomaly signal. "
-        "The autoencoder outperformed Isolation Forest and logistic regression on F1/recall, but Random "
-        "Forest remains strong on ROC-AUC when labels exist. The author's claims are supported for unsupervised "
-        "anomaly detection but not as a universal replacement for supervised IDS.\n\n"
-        "Future work: modern datasets (CICIDS2017), per-attack recall dashboards, F2-based threshold tuning, "
-        "concept-drift monitoring, deployment latency benchmarks, and combining autoencoder scores with "
-        "supervised ensembles in a hybrid SOC pipeline."
+        "Raw FN counts are misleading because categories have different sizes. Per-category recall = "
+        "TP_in_category / total_category_samples. R2L and U2R have high security importance despite fewer samples."
     )
+    pdf.table_from_csv(RESULTS_DIR / "category_recall_analysis.csv", "Table 6: Per-category recall (excerpt).", 20)
 
+    pdf.section("14. Conclusions")
     pdf.body(
-        "Artifacts generated by the pipeline:\n"
-        "- results/model_comparison.csv\n"
-        "- results/experiment_results.json (metrics, per-category errors, runtime)\n"
-        "- results/figures/autoencoder_reconstruction_error.png\n"
-        "- results/figures/confusion_matrices.png\n"
-        "- results/figures/class_imbalance.png"
+        "We fixed preprocessing leakage, matched the source protocol at 99th percentile, and added threshold "
+        "sensitivity, fair comparison, ablation, and distribution-shift analysis. The author's claim is only "
+        "partially supported: results depend on threshold and operating point. We do not overclaim feature-interaction "
+        "superiority without equal-FPR evidence. Future work: modern datasets, per-attack dashboards, deployment latency."
     )
 
     output = ROOT / "report.pdf"

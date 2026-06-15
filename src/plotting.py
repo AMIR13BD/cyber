@@ -48,6 +48,38 @@ def plot_class_imbalance(train_df, output_path: Path) -> None:
     plt.close(fig)
 
 
+def plot_threshold_sensitivity(sensitivity_df: pd.DataFrame, output_dir: Path) -> None:
+    """Plot metric curves vs threshold percentile for anomaly models."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metrics = ["precision", "recall", "f1", "f2", "fpr"]
+    for metric in metrics:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        for model, group in sensitivity_df.groupby("model"):
+            ax.plot(group["percentile"], group[metric], marker="o", label=model)
+        ax.set_title(f"{metric.upper()} vs Threshold Percentile")
+        ax.set_xlabel("Percentile on normal_validation scores")
+        ax.set_ylabel(metric.upper())
+        ax.set_ylim(0, 1.05)
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / f"threshold_{metric}.png", dpi=150)
+        plt.close(fig)
+
+
+def plot_distribution_shift(summary_df: pd.DataFrame, output_path: Path) -> None:
+    """Plot attack-rate and key numeric shift indicators."""
+    binary = summary_df[summary_df["metric_type"] == "binary_prevalence"]
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(binary["split"] + "_attack", binary["attack_rate"], color=["#3498db", "#e74c3c"])
+    ax.set_title("Attack Prevalence Shift: KDDTrain+ vs KDDTest+")
+    ax.set_ylabel("Attack rate")
+    ax.set_ylim(0, 1)
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
 def plot_confusion_matrices(
     y_true: np.ndarray,
     predictions: dict[str, np.ndarray],
